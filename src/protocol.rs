@@ -9,7 +9,7 @@ use iroh_gossip::net::Gossip;
 
 use crate::{
     api::DocsApi,
-    engine::{DefaultAuthorStorage, Engine, ProtectCallbackHandler},
+    engine::{AcceptCallback, DefaultAuthorStorage, Engine, ProtectCallbackHandler},
     store::Store,
 };
 
@@ -41,6 +41,7 @@ impl Docs {
         Builder {
             storage: Storage::Persistent(path),
             protect_cb: None,
+            accept_cb: None,
         }
     }
 
@@ -82,10 +83,19 @@ impl ProtocolHandler for Docs {
 }
 
 /// Builder for the docs protocol.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Builder {
     storage: Storage,
     protect_cb: Option<ProtectCallbackHandler>,
+    accept_cb: Option<AcceptCallback>,
+}
+
+impl std::fmt::Debug for Builder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Builder")
+            .field("storage", &self.storage)
+            .finish()
+    }
 }
 
 impl Builder {
@@ -94,6 +104,15 @@ impl Builder {
     /// See [`ProtectCallbackHandler::new`] for details.
     pub fn protect_handler(mut self, protect_handler: ProtectCallbackHandler) -> Self {
         self.protect_cb = Some(protect_handler);
+        self
+    }
+
+    /// Set an accept callback for sync requests.
+    ///
+    /// The callback is called when a peer requests to sync a namespace.
+    /// Return `AcceptOutcome::Allow` to accept, `AcceptOutcome::Reject` to reject.
+    pub fn accept_callback(mut self, cb: AcceptCallback) -> Self {
+        self.accept_cb = Some(cb);
         self
     }
 
@@ -125,6 +144,7 @@ impl Builder {
             downloader,
             author_store,
             self.protect_cb,
+            self.accept_cb,
         )
         .await?;
         Ok(Docs::new(engine))

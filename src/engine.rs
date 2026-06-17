@@ -26,6 +26,7 @@ use crate::{
     actor::SyncHandle, metrics::Metrics, Author, AuthorId, ContentStatus, ContentStatusCallback,
     Entry, NamespaceId,
 };
+pub use crate::engine::live::AcceptCallback;
 
 mod gossip;
 mod live;
@@ -68,6 +69,7 @@ impl Engine {
         downloader: Downloader,
         default_author_storage: DefaultAuthorStorage,
         protect_cb: Option<ProtectCallbackHandler>,
+        accept_cb: Option<AcceptCallback>,
     ) -> anyhow::Result<Self> {
         let (live_actor_tx, to_live_actor_recv) = mpsc::channel(ACTOR_CHANNEL_CAP);
         let me = endpoint.id().fmt_short().to_string();
@@ -122,6 +124,7 @@ impl Engine {
             to_live_actor_recv,
             live_actor_tx.clone(),
             sync.metrics().clone(),
+            accept_cb,
         )?;
         let actor_handle = n0_future::task::spawn(
             async move {

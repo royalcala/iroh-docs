@@ -142,6 +142,13 @@ type SyncConnectRes = (
 type SyncAcceptRes = Result<SyncFinished, AcceptError>;
 type DownloadRes = (NamespaceId, Hash, Result<(), anyhow::Error>);
 
+/// A callback to accept or reject sync requests for a namespace from a peer.
+///
+/// Returns `AcceptOutcome::Allow` to accept the sync, or `AcceptOutcome::Reject` to reject.
+pub type AcceptCallback = Arc<
+    dyn Fn(NamespaceId, PublicKey) -> std::future::Ready<AcceptOutcome> + Send + Sync + 'static,
+>;
+
 // Currently peers might double-sync in both directions.
 pub struct LiveActor {
     /// Receiver for actor messages.
@@ -179,6 +186,8 @@ pub struct LiveActor {
     /// Sync state per replica and peer
     state: NamespaceStates,
     metrics: Arc<Metrics>,
+    /// Optional callback to accept/reject sync requests.
+    accept_cb: Option<AcceptCallback>,
 }
 impl LiveActor {
     /// Create the live actor.
@@ -192,6 +201,7 @@ impl LiveActor {
         inbox: mpsc::Receiver<ToLiveActor>,
         sync_actor_tx: mpsc::Sender<ToLiveActor>,
         metrics: Arc<Metrics>,
+        accept_cb: Option<AcceptCallback>,
     ) -> Result<Self> {
         let (replica_events_tx, replica_events_rx) = async_channel::bounded(1024);
         let gossip_state = GossipState::new(gossip, sync.clone(), sync_actor_tx.clone());
@@ -217,6 +227,7 @@ impl LiveActor {
             queued_hashes: Default::default(),
             hash_providers: Default::default(),
             metrics,
+            accept_cb,
         })
     }
 
@@ -823,6 +834,13 @@ impl LiveActor {
         namespace: NamespaceId,
         peer: PublicKey,
     ) -> AcceptOutcome {
+        // Check external accept callback first
+        if let Some(ref cb) = self.accept_cb {
+            let outcome = cb(namespace, peer).into_inner();
+            if matches!(outcome, AcceptOutcome::Reject(_)) {
+                return outcome;
+            }
+        }
         self.state
             .accept_request(&self.endpoint.id(), &namespace, peer)
     }
